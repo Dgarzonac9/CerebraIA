@@ -1,0 +1,16 @@
+# Core ML
+tensorflow==2.19.0
+numpy
+pillow
+matplotlib
+tqdm
+
+# Dataset
+kaggle
+
+# LLMs / Agente
+langchain==0.2.16
+langchain-core==0.2.40
+langchain-google-genai==1.0.10
+langchain-groq==0.1.10
+google-generativeai==0.7.2

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Modelos entrenados (archivos grandes)
+*.keras
+*.h5
+*.pb
+modelos/
+checkpoints/
+
+# Datos generados
+imagenes_generadas/
+reportes/
+logs/
+dataset/
+*.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Colab / Drive
+drive/
+
+# Credenciales
+kaggle.json
+.kaggle/
