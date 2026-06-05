@@ -1,28 +1,133 @@
-# Práctica 3 IA — Generative AI: GANs, LLMs y Agentic AI
+# 🧠 CerebraIA
 
-Sistema de IA generativa para síntesis y análisis de imágenes de **MRI cerebral**, orientado a la detección de tumores. Combina tres componentes principales:
+> **IA generativa para el apoyo al diagnóstico temprano de tumores cerebrales mediante síntesis y análisis de imágenes de resonancia magnética.**
 
-1. **DCGAN** — genera imágenes sintéticas de resonancia magnética  
-2. **LLMs** (Gemini + Groq vía LangChain) — analizan imágenes y razonan sobre diagnósticos  
-3. **Agente autónomo** — orquesta las herramientas para completar flujos de trabajo médicos
+En Colombia, el acceso a diagnóstico especializado por imágenes es limitado y desigual. **CerebraIA** combina redes generativas adversariales, modelos de lenguaje multimodal y agentes autónomos para generar imágenes sintéticas de MRI cerebral, analizarlas y producir reportes médicos estructurados — acercando tecnología de punta a quienes más la necesitan.
 
-> ⚠️ Las imágenes generadas son **sintéticas y educativas**. Este sistema no reemplaza el diagnóstico médico profesional.
+>Las imágenes generadas son sintéticas y tienen fines educativos. Este sistema no reemplaza el diagnóstico médico profesional.
 
 ---
 
-## Estructura del repositorio
+## ✨ Capacidades principales
+
+| Capacidad | Tecnología |
+|-----------|-----------|
+| Generación de imágenes MRI sintéticas | DCGAN (TensorFlow) |
+| Análisis radiológico visual | Gemini 2.5 Flash (multimodal) |
+| Evaluación diagnóstica | LLaMA 3.1 vía Groq |
+| Orquestación autónoma de tareas | LangChain Agents |
+| Trazabilidad de decisiones | AgentLogger (JSON) |
+
+---
+
+## 🖼️ Sistema en acción
+
+### Dataset — 10 560 imágenes de MRI clasificadas en 4 categorías
+*glioma · meningioma · pituitary · no_tumor*
+
+![Dataset exploration](docs/images/dataset_exploration.png)
+
+### Preprocesamiento — 330 batches listos para entrenar la GAN
+
+![Preprocessing output](docs/images/preprocessing_output.png)
+
+### Demo del agente — generación, análisis y diagnóstico en lenguaje natural
+
+![Agent demo](docs/images/agent_demo.png)
+
+---
+
+## 🏗️ Arquitectura
 
 ```
-practica_3_ia/
+Usuario (lenguaje natural)
+        │
+        ▼
+ AgentExecutor (LangChain)
+        │
+        ├── generar_imagen_gan     →  DCGAN Generator (TensorFlow)
+        ├── analizar_imagen_llm    →  Gemini 2.5 Flash (visión multimodal)
+        ├── diagnostico_tumor_llm  →  LLaMA 3.1 · Groq
+        ├── comparar_imagenes      →  DCGAN × N muestras
+        └── generar_reporte_medico →  LLaMA 3.1 · Groq
+                │
+                ▼
+        AgentLogger → trazabilidad completa en JSON
+```
+
+### DCGAN — Generador (4×4 → 64×64)
+
+```
+Ruido (100,) → Dense → 4×4×512
+→ Conv2DTranspose(256) → 8×8
+→ Conv2DTranspose(128) → 16×16
+→ Conv2DTranspose(64)  → 32×32
+→ Conv2DTranspose(3, tanh) → 64×64×3
+```
+
+---
+
+## 🚀 Inicio rápido
+
+> Recomendado: **Google Colab** con GPU T4 o superior.
+
+### 1. Instalar dependencias
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Entrenar la GAN
+
+```python
+from src.data import setup_kaggle, download_dataset, find_images, preprocess_images, build_tf_dataset
+from src.gan  import DCGAN, GANCallback, train_gan
+
+setup_kaggle("TU_USUARIO_KAGGLE", "TU_API_KEY")
+download_dataset("/content/dataset")
+
+images  = find_images("/content/dataset")
+X_train = preprocess_images(images)
+dataset = build_tf_dataset(X_train)
+
+gan      = DCGAN(latent_dim=100)
+callback = GANCallback(gan, save_path="/content/outputs", save_interval=10)
+history  = train_gan(gan, dataset, epochs=200, callback=callback, models_path="/content/models")
+
+gan.generator.save("/content/models/generator_final.keras")
+```
+
+### 3. Lanzar el agente
+
+```python
+from src.agent import init_llms, init_generator, build_agent, AgentLogger, chat_with_agent, LLM_GROQ
+
+init_llms(google_api_key="...", groq_api_key="...")
+init_generator("/content/models/generator_final.keras", latent_dim=100)
+
+agent  = build_agent(LLM_GROQ)
+logger = AgentLogger()
+
+chat_with_agent(agent, logger, "Genera una imagen de MRI cerebral")
+chat_with_agent(agent, logger, "Analízala y dame un diagnóstico para un paciente de 52 años con cefaleas intensas")
+```
+
+---
+
+## 📁 Estructura del repositorio
+
+```
+CerebraIA/
 ├── src/
-│   ├── __init__.py      # Exports del paquete
-│   ├── gan.py           # Arquitectura DCGAN + entrenamiento
-│   ├── data.py          # Carga y preprocesamiento del dataset
-│   └── agent.py         # Tools LangChain + agente + logger
+│   ├── gan.py           # Arquitectura DCGAN y bucle de entrenamiento
+│   ├── data.py          # Carga, exploración y preprocesamiento del dataset
+│   ├── agent.py         # Tools LangChain, agente autónomo y logger
+│   └── __init__.py
 ├── notebooks/
-│   └── practica_3_ia.ipynb   # Notebook original para Google Colab
+│   └── proyecto_ia.py   # Código completo ejecutable en Google Colab
 ├── docs/
-│   └── architecture.md  # Descripción detallada de la arquitectura
+│   ├── architecture.md  # Descripción detallada de la arquitectura
+│   └── images/          # Capturas del sistema en funcionamiento
 ├── requirements.txt
 ├── .gitignore
 └── README.md
@@ -30,119 +135,37 @@ practica_3_ia/
 
 ---
 
-## Instalación
-
-```bash
-pip install -r requirements.txt
-```
-
-> El proyecto está pensado para ejecutarse en **Google Colab** con GPU.
-
----
-
-## Uso rápido
-
-### 1. Entrenamiento de la GAN
-
-```python
-from src.data import setup_kaggle, download_dataset, find_images, preprocess_images, build_tf_dataset
-from src.gan  import DCGAN, GANCallback, train_gan
-
-# Descargar dataset
-setup_kaggle("TU_USUARIO", "TU_API_KEY")
-download_dataset("/content/dataset")
-
-# Preprocesar
-images    = find_images("/content/dataset")
-X_train   = preprocess_images(images)
-dataset   = build_tf_dataset(X_train)
-
-# Entrenar
-gan      = DCGAN(latent_dim=100)
-callback = GANCallback(gan, save_path="/content/outputs", save_interval=10)
-history  = train_gan(gan, dataset, epochs=200, callback=callback, models_path="/content/models")
-
-# Guardar modelos
-gan.generator.save("/content/models/generator_final.keras")
-gan.discriminator.save("/content/models/discriminator_final.keras")
-```
-
-### 2. Agente de análisis
-
-```python
-from src.agent import init_llms, init_generator, build_agent, AgentLogger, chat_with_agent
-
-init_llms(google_api_key="...", groq_api_key="...")
-init_generator("/content/models/generator_final.keras", latent_dim=100)
-
-from src.agent import LLM_GROQ
-agent_executor = build_agent(LLM_GROQ)
-logger         = AgentLogger()
-
-# Flujo completo
-chat_with_agent(agent_executor, logger, "Genera una imagen de MRI")
-chat_with_agent(agent_executor, logger, "Analiza la imagen generada")
-chat_with_agent(agent_executor, logger,
-    "Dame un diagnóstico: hombre 52 años, cefaleas intensas 3 meses")
-```
-
----
-
-## Arquitectura del agente
-
-El agente dispone de **5 herramientas**:
-
-| Tool | Descripción |
-|------|-------------|
-| `generar_imagen_gan` | Crea una imagen de MRI sintética con la GAN |
-| `analizar_imagen_llm` | Análisis radiológico con Gemini (multimodal) |
-| `diagnostico_tumor_llm` | Evaluación diagnóstica con Groq/LLaMA |
-| `comparar_imagenes` | Genera múltiples imágenes para explorar variabilidad |
-| `generar_reporte_medico` | Redacta un reporte clínico estructurado |
-
----
-
-## Requisitos
+## ⚙️ Requisitos
 
 - Python 3.10+
-- Google Colab (recomendado, GPU T4 o superior)
-- Cuenta en [Kaggle](https://www.kaggle.com) (dataset)
-- API Keys: Google Gemini y Groq
+- Google Colab (GPU T4 recomendada)
+- Cuenta en [Kaggle](https://www.kaggle.com) para el dataset
+- API keys: [Google AI Studio](https://aistudio.google.com) y [Groq](https://console.groq.com)
 
----
-
-## Variables de entorno / Secrets de Colab
-
-En Colab, configura los siguientes *Secrets*:
+### Secrets en Google Colab
 
 | Secret | Descripción |
 |--------|-------------|
-| `GOOGLE_API_KEY` | API key de Google AI Studio (Gemini) |
+| `GOOGLE_API_KEY` | API key de Gemini (Google AI Studio) |
 | `GROQ_API_KEY` | API key de Groq |
 
 ---
 
-## Capturas del sistema
+## 📊 Dataset
 
-### Exploración del dataset
-10 560 imágenes distribuidas en 4 clases: glioma, meningioma, pituitary y no_tumor.
+[Brain Tumor MRI Dataset — Kaggle (ishans24)](https://www.kaggle.com/datasets/ishans24/brain-tumor-dataset)
 
-![Dataset exploration](docs/images/dataset_exploration.png)
+10 560 imágenes de resonancia magnética cerebral distribuidas en 4 clases:
 
-### Preprocesamiento
-10 560 imágenes redimensionadas a 64×64×3 y normalizadas a [-1, 1] en ~55 minutos, formando 330 batches de 32.
-
-![Preprocessing output](docs/images/preprocessing_output.png)
-
-### Demo del agente
-El agente genera una imagen MRI sintética con la GAN (seed=123) y la analiza con los LLMs.
-
-![Agent demo](docs/images/agent_demo.png)
+| Clase | Imágenes |
+|-------|----------|
+| Glioma | 3 754 |
+| Meningioma | 2 343 |
+| Pituitary | 2 706 |
+| No tumor | 1 757 |
 
 ---
 
-## Dataset
+## 👤 Autor
 
-[Brain Tumor Dataset — Kaggle (ishans24)](https://www.kaggle.com/datasets/ishans24/brain-tumor-dataset)
-
-Imágenes de MRI cerebral clasificadas en carpetas por tipo de tumor.
+**Daniel Garzón** — [@Dgarzonac9](https://github.com/Dgarzonac9)
