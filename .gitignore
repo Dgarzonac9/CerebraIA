@@ -27,3 +27,7 @@ drive/
 # Credenciales
 kaggle.json
 .kaggle/
+
+# Resultados de evaluación (se versionan)
+!eval/results/
+!eval/results/*.json
