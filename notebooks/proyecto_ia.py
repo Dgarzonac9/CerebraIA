@@ -46,8 +46,8 @@ print("Dependencias instaladas correctamente")
 # Configuración de Kaggle para acceder al dataset
 
 import os
-KAGGLE_USERNAME = "hanfer05"
-KAGGLE_KEY = "KGAT_065a546aa6a9946a11d4fa1147229d74"
+KAGGLE_USERNAME = os.environ["KAGGLE_USERNAME"]
+KAGGLE_KEY = os.environ["KAGGLE_KEY"]
 
 # Crear directorio de Kaggle
 os.makedirs('/root/.kaggle', exist_ok=True)
