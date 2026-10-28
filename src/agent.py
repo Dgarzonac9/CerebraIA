@@ -22,6 +22,10 @@ from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 
+from .guardrails import (
+    LLMResponseError, safe_invoke, apply_guardrails, drain_events, sanitize_definitive_claims,
+)
+
 
 # ─── Estado global de la sesión ───────────────────────────────────────────────
 
@@ -125,7 +129,8 @@ def analizar_imagen_llm(descripcion_adicional: str = "") -> str:
     prompt = (
         "Eres un radiólogo experto analizando una imagen de resonancia magnética (MRI) cerebral. "
         "Proporciona descripción general, hallazgos relevantes e impresión inicial. "
-        "Imagen generada por IA con fines educativos."
+        "Imagen generada por IA con fines educativos. "
+        "Usa lenguaje probabilístico; no afirmes diagnósticos definitivos."
     )
     if descripcion_adicional:
         prompt += f"\nContexto adicional: {descripcion_adicional}"
@@ -136,7 +141,12 @@ def analizar_imagen_llm(descripcion_adicional: str = "") -> str:
             "url": f"data:image/png;base64,{STATE_LAST_IMAGE['base64']}"
         }},
     ])
-    analysis = LLM_GEMINI.invoke([message]).content
+    try:
+        analysis = apply_guardrails(
+            safe_invoke(LLM_GEMINI, [message], "analizar_imagen_llm"), "analizar_imagen_llm"
+        )
+    except LLMResponseError as e:
+        return f"ERROR: {e} No se generó ningún análisis."
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     STATE_LAST_ANALYSIS = {
@@ -164,9 +174,15 @@ def diagnostico_tumor_llm(sintomas_paciente: str = "") -> str:
     prompt = (
         f"Eres un neurólogo especialista en neuro-oncología.\n\n"
         f"ANÁLISIS RADIOLÓGICO:\n{STATE_LAST_ANALYSIS['analisis']}\n\n"
-        f"SÍNTOMAS:\n{sintomas_paciente or 'No especificados'}"
+        f"SÍNTOMAS:\n{sintomas_paciente or 'No especificados'}\n\n"
+        "Presenta solo impresiones probables; no afirmes diagnósticos definitivos."
     )
-    diagnostico = LLM_GROQ.invoke(prompt).content
+    try:
+        diagnostico = apply_guardrails(
+            safe_invoke(LLM_GROQ, prompt, "diagnostico_tumor_llm"), "diagnostico_tumor_llm"
+        )
+    except LLMResponseError as e:
+        return f"ERROR: {e} No se generó ninguna evaluación."
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     STATE_SESSION_HISTORY.append({
@@ -226,9 +242,15 @@ def generar_reporte_medico(
 
     prompt = (
         f"Genera un reporte médico profesional basado en este análisis:\n"
-        f"{STATE_LAST_ANALYSIS['analisis']}"
+        f"{STATE_LAST_ANALYSIS['analisis']}\n\n"
+        "Usa lenguaje probabilístico; no afirmes diagnósticos definitivos."
     )
-    reporte  = LLM_GROQ.invoke(prompt).content
+    try:
+        reporte = apply_guardrails(
+            safe_invoke(LLM_GROQ, prompt, "generar_reporte_medico"), "generar_reporte_medico"
+        )
+    except LLMResponseError as e:
+        return f"ERROR: {e} No se generó ningún reporte."
     filename = f"reporte_medico_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     path     = os.path.join(REPORTS_PATH, filename)
 
@@ -275,6 +297,8 @@ HERRAMIENTAS DISPONIBLES:
 IMPORTANTE:
 - Las imágenes son sintéticas y educativas
 - No reemplaza diagnóstico médico real
+- No afirmes diagnósticos definitivos; usa "hallazgo probable"
+- Si una herramienta devuelve un ERROR, informa el error al usuario; no inventes resultados
 - Responde siempre en español
 """
 
@@ -300,8 +324,20 @@ class AgentLogger:
 
     def __init__(self):
         self.logs: list[dict] = []
+        self.guardrail_events: list[dict] = []
 
-    def log_interaction(self, user_input, agent_response, tools_used, reasoning, tool_outputs):
+    def log_guardrail(self, guardrail: str, detail: str = "") -> dict:
+        """Registra la activación de un guardrail."""
+        event = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "guardrail": guardrail,
+            "detail":    detail,
+        }
+        self.guardrail_events.append(event)
+        return event
+
+    def log_interaction(self, user_input, agent_response, tools_used, reasoning, tool_outputs,
+                        guardrails=None):
         self.logs.append({
             "timestamp":       time.strftime("%Y-%m-%d %H:%M:%S"),
             "user_input":      user_input,
@@ -309,6 +345,7 @@ class AgentLogger:
             "tools_used":      tools_used,
             "reasoning_steps": reasoning,
             "tool_outputs":    tool_outputs,
+            "guardrails":      guardrails or [],
         })
 
     def show_summary(self):
@@ -320,6 +357,8 @@ class AgentLogger:
             print(f"  Usuario : {entry['user_input']}")
             print(f"  Agente  : {entry['agent_response']}")
             print(f"  Tools   : {', '.join(entry['tools_used']) or '—'}")
+            if entry.get("guardrails"):
+                print(f"  Guardrails: {', '.join(g['guardrail'] for g in entry['guardrails'])}")
 
     def save_to_json(self, filename: str = "agent_trace.json"):
         with open(filename, "w", encoding="utf-8") as f:
@@ -329,8 +368,20 @@ class AgentLogger:
 
 # ─── Interfaz de chat ─────────────────────────────────────────────────────────
 
+# Guardrails tras los cuales el agente debe responder con el error y no con texto propio
+_BLOCKING_GUARDRAILS = {"llm_error", "respuesta_vacia", "llm_no_inicializado"}
+
+
+def _collect_guardrails(logger: AgentLogger) -> list[dict]:
+    events = [logger.log_guardrail(**e) for e in drain_events()]
+    for e in events:
+        print(f"[guardrail] {e['guardrail']}: {e['detail']}")
+    return events
+
+
 def chat_with_agent(agent_executor: AgentExecutor, logger: AgentLogger, user_input: str) -> str:
     print(f"\n{'=' * 60}\nUsuario: {user_input}\n{'=' * 60}")
+    drain_events()  # descarta eventos de interacciones anteriores
     try:
         response = agent_executor.invoke({"input": user_input, "chat_history": []})
         output   = response["output"]
@@ -342,12 +393,26 @@ def chat_with_agent(agent_executor: AgentExecutor, logger: AgentLogger, user_inp
             tool_calls.append(action.tool)
             tool_results.append(result)
 
-        logger.log_interaction(user_input, output, tool_calls, reasoning, tool_results)
+        events = _collect_guardrails(logger)
+        if any(e["guardrail"] in _BLOCKING_GUARDRAILS for e in events):
+            errors = [str(r) for r in tool_results if str(r).startswith("ERROR:")]
+            output = "\n".join(errors) or "ERROR: falló la llamada al LLM. No se generó ningún resultado."
+            events.append(logger.log_guardrail(
+                "respuesta_reemplazada_por_error", "se evitó texto no verificado del agente"))
+        else:
+            output, found = sanitize_definitive_claims(output)
+            if found:
+                events.append(logger.log_guardrail(
+                    "frase_diagnostica_definitiva", f"respuesta final: reescrito {found}"))
+
+        logger.log_interaction(user_input, output, tool_calls, reasoning, tool_results, guardrails=events)
         print(f"\n{'-' * 60}\nAgente:\n{output}\n{'-' * 60}")
         return output
 
     except Exception as e:
         err = f"Error: {e}"
+        events = _collect_guardrails(logger)
+        logger.log_interaction(user_input, err, [], [], [], guardrails=events)
         print(err)
         return err
 
