@@ -122,9 +122,16 @@ CerebraIA/
 │   ├── gan.py           # Arquitectura DCGAN y bucle de entrenamiento
 │   ├── data.py          # Carga, exploración y preprocesamiento del dataset
 │   ├── agent.py         # Tools LangChain, agente autónomo y logger
+│   ├── guardrails.py    # Advertencia, filtro de diagnósticos y manejo de fallos del LLM
 │   └── __init__.py
+├── eval/
+│   ├── quality_metrics.py   # FID y KID
+│   ├── classifier_check.py  # Verificación con clasificador
+│   └── results/             # Resultados en JSON
+├── tests/               # pytest con LLMs simulados
 ├── notebooks/
-│   └── proyecto_ia.py   # Código completo ejecutable en Google Colab
+│   ├── proyecto_ia.py          # Código completo ejecutable en Google Colab
+│   └── evaluacion_colab.ipynb  # Evaluación en Colab (GPU T4)
 ├── docs/
 │   ├── architecture.md  # Descripción detallada de la arquitectura
 │   └── images/          # Capturas del sistema en funcionamiento
@@ -163,6 +170,56 @@ CerebraIA/
 | Meningioma | 2 343 |
 | Pituitary | 2 706 |
 | No tumor | 1 757 |
+
+---
+
+## Evaluación y uso responsable
+
+Una GAN que "se ve bien" no es evidencia de calidad. Esta capa mide la calidad de las imágenes sintéticas y limita lo que el agente puede afirmar.
+
+### Qué se mide y por qué
+
+| Componente | Qué hace | Cómo leerlo |
+|------------|----------|-------------|
+| **FID** (`eval/quality_metrics.py`) | Distancia de Fréchet entre las características InceptionV3 de imágenes reales y sintéticas. | Menor es mejor. Es sensible a la calidad y a la diversidad. |
+| **KID** (`eval/quality_metrics.py`) | MMD² con kernel polinomial sobre las mismas características. | Menor es mejor. Es insesgado y más fiable con pocas muestras. |
+| **Verificación con clasificador** (`eval/classifier_check.py`) | Una CNN entrenada solo con imágenes reales clasifica las sintéticas. | Confianza media baja: imágenes poco reconocibles. Distribución concentrada en una clase (entropía baja): posible *mode collapse*. |
+| **Guardrails** (`src/guardrails.py`) | Advertencia fija, filtro de diagnósticos definitivos, error claro si el LLM falla o responde vacío, y registro en `AgentLogger`. | Cada activación queda en el campo `guardrails` de la traza JSON. |
+
+Limitaciones:
+- El generador es **incondicional** (recibe solo ruido), así que FID y KID se calculan solo de forma **global**, no por clase.
+- El clasificador siempre elige una de las 4 clases. Sus predicciones sobre imágenes sintéticas son un indicador, no una etiqueta verdadera.
+- Imágenes de 64x64 reescaladas a 299x299 para InceptionV3 no son comparables con FID publicados para otros datasets.
+
+### Guardrails del agente
+
+- Todo análisis, evaluación y reporte lleva la advertencia: *"Imagen sintética / uso educativo / no reemplaza diagnóstico médico"*.
+- Frases como "el paciente tiene" o "diagnóstico confirmado" se reescriben como hallazgo probable.
+- Si una llamada a Gemini o Groq falla o devuelve texto vacío, el agente responde con el error y no genera contenido.
+
+### Cómo ejecutarlo
+
+```bash
+# Pruebas (sin GPU, sin claves, LLMs simulados)
+pip install -r requirements-dev.txt
+pytest
+
+# Métricas (recomendado en Colab con GPU T4; ver notebooks/evaluacion_colab.ipynb)
+python -m eval.quality_metrics  --weights models/generator_final.keras --data-dir /content/dataset --n-samples 5000 --out eval/results/metrics.json
+python -m eval.classifier_check --weights models/generator_final.keras --data-dir /content/dataset --n-samples 1000
+```
+
+Las claves de API (`GOOGLE_API_KEY`, `GROQ_API_KEY`, `KAGGLE_USERNAME`, `KAGGLE_KEY`) se leen solo de variables de entorno o de los secrets de Colab.
+
+### Resultados
+
+| Métrica | Valor |
+|---------|-------|
+| FID global | pendiente de ejecutar en Colab |
+| KID global (media ± desv.) | pendiente de ejecutar en Colab |
+| Exactitud del clasificador en validación (reales) | pendiente de ejecutar en Colab |
+| Confianza media sobre sintéticas | pendiente de ejecutar en Colab |
+| Distribución de clases predichas (sintéticas) | pendiente de ejecutar en Colab |
 
 ---
 
